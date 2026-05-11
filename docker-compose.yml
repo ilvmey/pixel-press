@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"   # AMQP 通訊埠
+      - "15672:15672" # RabbitMQ 管理後台介面
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
   redis:
     image: redis:latest
     ports:
@@ -8,37 +17,38 @@ services:
 
   api:
     build: .
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
     ports:
       - "8000:8000"
     depends_on:
+      - rabbitmq
       - redis
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
 
   worker:
     build: .
-    command: celery -A app.workers.worker.celery_app worker --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/app
+    command: python -m celery -A app.workers.worker.celery_app worker --loglevel=info
     volumes:
       - .:/app
-    environment:
-      - PYTHONPATH=/app
-      - CELERY_BROKER_URL=redis://redis:6379/0
     depends_on:
+      - rabbitmq
       - redis
   dashboard:
     image: mher/flower
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     ports:
       - "5555:5555"
     depends_on:
-      - redis
-  redis-insight:
-    image: redis/redisinsight:latest
-    ports:
-      - "8001:8001"
-    depends_on:
+      - rabbitmq
       - redis
